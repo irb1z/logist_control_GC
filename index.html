@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Логистика: Контроль отгрузок</title>
+    <style>
+        .delivery-method-filled {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        body { font-family: sans-serif; padding: 10px; background: #f4f4f4; margin: 0; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        
+        /* Фильтры: теперь 3 колонки вместо 4 */
+        .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        input, select { padding: 8px; width: 100%; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; font-size: 14px; }
+        button:hover { background: #0056b3; }
+        button.reset { background: #6c757d; }
+        button.reset:hover { background: #5a6268; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+        th { background-color: #f2f2f2; position: sticky; top: 0; z-index: 10; }
+        tr:hover { background-color: #f9f9f9; }
+        
+        .status-ok { color: green; font-weight: bold; }
+        .status-wait { color: orange; font-weight: bold; }
+        
+        /* Стили для ячейки комментария: обрезает длинный текст троеточием */
+        .comment-cell {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 250px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📦 Логистика: Контроль отгрузок</h2>
+    
+    <div class="filters">
+        <input type="text" id="filter-manager" placeholder="Фильтр: ФИО менеджера">
+        <input type="text" id="filter-client" placeholder="Фильтр: Клиент">
+        <input type="text" id="filter-track" placeholder="Фильтр: Трек-номер">
+        <!-- Поле для комментария УДАЛЕНО. Мы не фильтруем по нему и не вводим ничего -->
+        
+        <button onclick="applyFilters()">Применить фильтры</button>
+        <button onclick="location.reload()" class="reset">Сбросить</button>
+    </div>
+
+    <!-- ТАБЛИЦА -->
+    <table id="logistics-table">
+        <thead>
+            <tr>
+                <th>Менеджер</th>
+                <th>Счет</th>
+                <th>Клиент</th>
+                <th>План доставки</th>
+                <th>Факт доставки</th>
+                <th>Способ</th>
+                <th>Трек</th>
+                <th>Дата</th>
+                <!-- Колонка "Месяц" заменена на "Комментарий" -->
+                <th>Комментарий</th> 
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td colspan="10" style="text-align:center;">Загрузка данных...</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // ВСТАВЬТЕ СЮДА ВАШ ID ТАБЛИЦЫ
+    const sheetId = '1JMSWMsssYxUgsa9Q-ItYmVxKqx2qDPBzsWY84ukDgkc'; 
+    
+    // Название листа (должно точно совпадать с вкладкой внизу Google Sheets)
+    const sheetName = 'Лист1'; 
+
+    async function loadData() {
+        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+        try {
+            const response = await fetch(url);
+            const text = await response.text();
+            // Google Sheets API возвращает JSON в специфичном формате, нужно убрать обертки
+            const jsonStr = text.replace("/*O_o*/", "").replace("google.visualization.Query.setResponse(", "").slice(0, -2);
+            const data = JSON.parse(jsonStr);
+            
+            renderTable(data.table.rows);
+        } catch (error) {
+            document.querySelector('tbody').innerHTML = `<tr><td colspan="10" style="text-align:center; color:red;">Ошибка загрузки. Проверьте консоль (F12) и ID таблицы.</td></tr>`;
+            console.error(error);
+        }
+    }
+
+    function renderTable(rows) {
+        const tbody = document.querySelector('#logistics-table tbody');
+        tbody.innerHTML = '';
+
+        rows.forEach(row => {
+            // Проверка на пустые строки и наличие нужного количества колонок
+            if (!row.c || row.c.length < 9) return; 
+
+            const manager = row.c[0] ? row.c[0].v : '';
+            const invoice = row.c[1] ? row.c[1].v : '';
+            const client = row.c[2] ? row.c[2].v : '';
+            const planSum = row.c[3] ? row.c[3].v : '0';
+            const factSum = row.c[4] ? row.c[4].v : '0';
+            const deliveryType = row.c[5] ? row.c[5].v : '';
+            const track = row.c[6] ? row.c[6].v : '';
+            const date = row.c[7] ? row.c[7].v : '';
+            
+            // !!! ИЗМЕНЕНИЕ: Берем 9-ю колонку (индекс 8) как Комментарий из базы данных
+            const comment = row.c[8] ? row.c[8].v : '-';
+            
+
+            // Простая логика статуса
+            let statusClass = 'status-wait';
+            let statusText = 'Ожидание';
+            if (track !== null && track !== '') 
+            {
+                statusClass = 'status-ok';
+                statusText = 'Отгружен';
+            }
+
+            // Определяем класс для ячейки «Способ»
+            const deliveryMethodClass = deliveryType ? 'delivery-method-filled' : '';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${manager}</td>
+                <td>#${invoice}</td>
+                <td><b>${client}</b></td>
+                <td>${planSum} ₽</td>
+                <td>${factSum} ₽</td>
+                <td class="${deliveryMethodClass}">${deliveryType}</td>
+                <td>${track || '-'}</td>
+                <td>${date}</td>
+                <!-- Выводим комментарий из базы. Класс .comment-cell обрезает длинный текст -->
+                <td class="comment-cell" title="${comment}">${comment}</td>
+                <td class="${statusClass}">${statusText}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function applyFilters() {
+        const managerFilter = document.getElementById('filter-manager').value.toLowerCase();
+        const clientFilter = document.getElementById('filter-client').value.toLowerCase();
+        const trackFilter = document.getElementById('filter-track').value.toLowerCase();
+
+        const rows = document.querySelectorAll('#logistics-table tbody tr');
+
+        rows.forEach(row => {
+            const cols = row.querySelectorAll('td');
+            // Индексы колонок соответствуют порядку в HTML таблице
+            const m = cols[0].innerText.toLowerCase();
+            const c = cols[2].innerText.toLowerCase();
+            const t = cols[6].innerText.toLowerCase();
+            // Комментарий теперь на 8 месте (перед статусом), но мы его НЕ фильтруем
+
+            const matchesManager = m.includes(managerFilter);
+            const matchesClient = c.includes(clientFilter);
+            const matchesTrack = t.includes(trackFilter);
+
+            if (matchesManager && matchesClient && matchesTrack) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
+    // Запуск при загрузке
+    loadData();
+</script>
+
+</body>
+</html>
+
